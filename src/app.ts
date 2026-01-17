@@ -3,18 +3,22 @@
 import express from "express";
 import axios from "axios";
 import { createClient } from "redis";
+import kleur from "kleur";
 
 const redis = createClient();
 await redis.connect();
 
 let port: number | undefined;
-let origin: string | undefined;
+let origin: string;
 
 // Fetching shell comman arguments
 const args = process.argv.slice(2);
 
 if (args.includes("--clear-cache")) {
 	// clear cache
+	console.log(kleur.bgGreen("CACHE FLUSHED"));
+	redis.flushDb();
+	process.exit(0);
 }
 
 for (let i = 0; i < args.length; i++) {
@@ -23,7 +27,7 @@ for (let i = 0; i < args.length; i++) {
 	}
 
 	if (args[i] === "--origin") {
-		origin = args[i + 1];
+		origin = args[i + 1]?.toString() as string;
 	}
 }
 
@@ -48,29 +52,35 @@ app.use(async (req, res) => {
 		const cached = await redis.get(cacheKey);
 		if (cached) {
 			res.set("X-Cache", "HIT");
+			console.log(kleur.bgMagenta("HIT"));
 			return res.json(JSON.parse(cached));
 		}
 	}
 
-	const originResponse = await axios.get(`${origin}/${url}`);
+	const originResponse = await axios.get(`${origin}${url}`, {
+		// Forward Client Headers
+		headers: {
+			"Content-Type": req.headers["content-type"],
+			"Cache-Control": req.headers["cache-control"],
+		},
+	});
 
-	const content_type = originResponse.headers["Content-Type"] as string;
-	const cache_control = originResponse.headers["Cache-Control"] as string;
-
-	// Setting Headers
+	// Setting Response Headers
 	res.set({
-		"Content-Type": content_type,
-		"Cache-Control": cache_control,
+		"X-Cache": "MISS",
+		"Content-Type": originResponse.headers["Content-Type"],
+		"Cache-Control": originResponse.headers["Cache-Control"],
 	});
 
 	// Redis Cache
 	redis.setEx(`${method}:${url}`, 3600, JSON.stringify(originResponse.data));
 
-	return res.json({ data: originResponse });
+	console.log(kleur.bgMagenta("MISS"));
+	return res.json({ data: originResponse.data });
 });
 
 app.listen(port, () => {
-	console.log("Server Running");
-	console.log("Port: ", port);
-	console.log("Origin ", origin);
+	console.log(kleur.bgWhite("Server Running"));
+	console.log(kleur.bgWhite(`Port: ${port}`));
+	console.log(kleur.bgWhite(`Origin: ${origin}`));
 });

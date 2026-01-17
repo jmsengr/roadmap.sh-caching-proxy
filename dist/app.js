@@ -2,6 +2,7 @@
 import express from "express";
 import axios from "axios";
 import { createClient } from "redis";
+import kleur from "kleur";
 const redis = createClient();
 await redis.connect();
 let port;
@@ -10,13 +11,15 @@ let origin;
 const args = process.argv.slice(2);
 if (args.includes("--clear-cache")) {
     // clear cache
+    console.log(kleur.bgGreen("CACHE FLUSHED"));
+    redis.flushDb();
 }
 for (let i = 0; i < args.length; i++) {
     if (args[i] === "--port") {
         port = Number(args[i + 1]);
     }
     if (args[i] === "--origin") {
-        origin = args[i + 1];
+        origin = args[i + 1]?.toString();
     }
 }
 const app = express();
@@ -27,18 +30,37 @@ app.get("/test", async (req, res, next) => {
 // Proxy
 app.use(async (req, res) => {
     // Clear cached
-    const cacheKey = `${req.method}:${req.originalUrl}`;
-    if (req.method === "GET") {
-        const cached = await redis.get(`${req.method}:${req.originalUrl}`);
+    const method = req.method;
+    const url = req.originalUrl;
+    const cacheKey = `${method}:${url}`;
+    if (method === "GET") {
+        const cached = await redis.get(cacheKey);
         if (cached) {
             res.set("X-Cache", "HIT");
+            console.log(kleur.bgMagenta("HIT"));
             return res.json(JSON.parse(cached));
         }
     }
-    const originResponse = await axios.get(`${origin}`);
+    const originResponse = await axios.get(`${origin}${url}`, {
+        // Forward Client Headers
+        headers: {
+            "Content-Type": req.headers["content-type"],
+            "Cache-Control": req.headers["cache-control"],
+        },
+    });
+    // Setting Response Headers
+    res.set({
+        "X-Cache": "MISS",
+        "Content-Type": originResponse.headers["Content-Type"],
+        "Cache-Control": originResponse.headers["Cache-Control"],
+    });
+    // Redis Cache
+    redis.setEx(`${method}:${url}`, 3600, JSON.stringify(originResponse.data));
+    console.log(kleur.bgMagenta("MISS"));
+    return res.json({ data: originResponse.data });
 });
 app.listen(port, () => {
-    console.log("Server Running");
-    console.log("Port: ", port);
-    console.log("Origin ", origin);
+    console.log(kleur.bgWhite("Server Running"));
+    console.log(kleur.bgWhite(`Port: ${port}`));
+    console.log(kleur.bgWhite(`Origin: ${origin}`));
 });

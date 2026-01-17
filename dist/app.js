@@ -1,9 +1,24 @@
+#!/usr/bin/env node
 import express from "express";
 import axios from "axios";
 import { createClient } from "redis";
 const redis = createClient();
 await redis.connect();
-const PORT = 3000;
+let port;
+let origin;
+// Fetching shell comman arguments
+const args = process.argv.slice(2);
+if (args.includes("--clear-cache")) {
+    // clear cache
+}
+for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--port") {
+        port = Number(args[i + 1]);
+    }
+    if (args[i] === "--origin") {
+        origin = args[i + 1];
+    }
+}
 const app = express();
 app.use(express.json());
 app.get("/test", async (req, res, next) => {
@@ -11,6 +26,7 @@ app.get("/test", async (req, res, next) => {
 });
 // Proxy
 app.use(async (req, res) => {
+    // Clear cached
     const cacheKey = `${req.method}:${req.originalUrl}`;
     if (req.method === "GET") {
         const cached = await redis.get(`${req.method}:${req.originalUrl}`);
@@ -19,8 +35,10 @@ app.use(async (req, res) => {
             return res.json(JSON.parse(cached));
         }
     }
-    const originResponse = await axios({});
+    const originResponse = await axios.get(`${origin}`);
 });
-app.listen(PORT, () => {
-    console.log("RUNNING ON PORT " + PORT);
+app.listen(port, () => {
+    console.log("Server Running");
+    console.log("Port: ", port);
+    console.log("Origin ", origin);
 });
